@@ -155,7 +155,7 @@ async function upsertTask(task) {
   if (delErr) throw delErr;
   const { error: insErr } = await supabase
     .from('task_collaborators')
-    .insert(collaborators.map(cid => ({ task_id: id, contact_id: cid })));
+    .insert(collaborators.map(cid => ({ task_id: id, contact_id: cid, owner_id: user.id })));
   if (insErr) throw insErr;
 
   // Insert any new comments. Comments aren't editable, so we just upsert by id.
@@ -170,6 +170,7 @@ async function upsertTask(task) {
       author_id: c.author,
       text: c.text,
       created_at: c.at,
+      owner_id: user.id,
     }));
     const { error: cErr } = await supabase.from('task_comments').upsert(rows);
     if (cErr) throw cErr;
@@ -185,7 +186,9 @@ async function deleteTask(id) {
 }
 
 async function addComment(taskId, authorId, text) {
-  const row = { id: uid('C'), task_id: taskId, author_id: authorId, text };
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in');
+  const row = { id: uid('C'), task_id: taskId, author_id: authorId, text, owner_id: user.id };
   const { data, error } = await supabase.from('task_comments').insert(row).select().single();
   if (error) throw error;
   return { id: data.id, author: data.author_id, text: data.text, at: data.created_at };
