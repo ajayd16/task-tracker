@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Task Tracker — Daily</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    /* Palette — blue */
+    --cream: #F4F7FF;          /* canvas */
+    --cream-2: #E9EFFA;        /* layered surface */
+    --cream-3: #DCE5F4;        /* divider / hover */
+    --olive: #0B1F3D;          /* navy ink */
+    --olive-deep: #050E1E;     /* deepest */
+    --olive-soft: #4A5E80;     /* secondary text */
+    --accent: #2E5BFF;         /* bright blue accent */
+    --accent-soft: #6E8DFF;
+    --ink: #0B1F3D;
+    --danger: #C13B3B;
+    --warn: #C77A2E;
+    --done: #1F8A5B;
+
+    /* Type — Geist body, Instrument Serif display, JetBrains Mono numerics */
+    --font-display: 'Geist', 'Helvetica Neue', Helvetica, system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+    --font-serif: 'Instrument Serif', 'Geist', Georgia, serif;
+
+    /* Geometry */
+    --border: 1px solid color-mix(in oklab, var(--olive) 18%, transparent);
+    --border-thin: 1px solid color-mix(in oklab, var(--olive) 12%, transparent);
+    --radius: 14px;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--cream);
+    color: var(--ink);
+    font-family: var(--font-display);
+    font-feature-settings: "ss01", "ss02";
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* clean canvas — no grain */
+
+  #root { position: relative; z-index: 1; }
+
+  /* utility */
+  .mono { font-family: var(--font-mono); font-feature-settings: "tnum"; }
+  .serif { font-family: var(--font-serif); }
+  .uppercase { text-transform: uppercase; letter-spacing: 0.08em; }
+  .micro { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 500; }
+
+  button { font-family: inherit; cursor: pointer; }
+  input, textarea, select { font-family: inherit; color: inherit; }
+
+  /* Selection */
+  ::selection { background: var(--olive); color: var(--cream); }
+
+  /* Custom checkbox click animation */
+  @keyframes pop { 0% { transform: scale(1); } 50% { transform: scale(1.18); } 100% { transform: scale(1); } }
+  @keyframes slidein { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+  @keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+  .blink { animation: blink 1s steps(2) infinite; }
+
+  /* Scrollbar styling */
+  *::-webkit-scrollbar { width: 10px; height: 10px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb { background: color-mix(in oklab, var(--olive) 40%, transparent); border: 2px solid var(--cream); }
+  *::-webkit-scrollbar-thumb:hover { background: var(--olive); }
+
+  /* hidden state for content while React boots */
+  .boot { display: flex; align-items: center; justify-content: center; min-height: 100vh; font-family: var(--font-mono); color: var(--olive); }
+</style>
+</head>
+<body>
+  <div id="root"><div class="boot">› initialising task.tracker<span class="blink">_</span></div></div>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+</html>
