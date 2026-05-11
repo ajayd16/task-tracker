@@ -111,6 +111,21 @@ async function loadTasks() {
   return data.map(rowToTask);
 }
 
+async function updateContact(id, fields) {
+  // Auto-derive initials if name changed and no initials passed
+  const patch = { ...fields };
+  if (patch.name && !patch.initials) {
+    patch.initials = patch.name.trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '··';
+  }
+  const { data, error } = await supabase
+    .from('contacts').update(patch).eq('id', id).select().single();
+  if (error) throw error;
+  // Keep in-memory PEOPLE in sync
+  const idx = PEOPLE.findIndex(p => p.id === id);
+  if (idx >= 0) PEOPLE[idx] = { id: data.id, name: data.name, initials: data.initials, color: data.color };
+  return PEOPLE[idx];
+}
+
 /* Writes — per task, not bulk -------------------------------------------- */
 async function upsertTask(task) {
   const { data: { user } } = await supabase.auth.getUser();
@@ -201,7 +216,7 @@ export {
   PROJECTS, PEOPLE, PRIORITIES, STATUSES,
   toISODate, todayISO, addDays, startOfWeek, startOfMonth, fmtLong, fmtShort, dayName, relTime,
   uid,
-  loadContacts, loadTasks, upsertTask, deleteTask, addComment,
+  loadContacts, loadTasks, upsertTask, deleteTask, addComment, updateContact,
   toCSV, downloadBlob,
   personById, projectById,
 };

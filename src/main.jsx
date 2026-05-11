@@ -2,9 +2,9 @@
 import React, { useState as uS, useEffect as uE, useMemo as uM, useCallback as uC, useRef as uR } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
-  PROJECTS,
+  PROJECTS, PEOPLE,
   addDays, downloadBlob, fmtLong, fmtShort, loadContacts, loadTasks, personById, projectById,
-  upsertTask, deleteTask,
+  upsertTask, deleteTask, updateContact,
   startOfMonth, startOfWeek, toCSV, toISODate,
 } from './data.js';
 import { Header, StatStrip, TaskModal } from './components.jsx';
@@ -118,6 +118,8 @@ function App() {
 
   /* Export --------------------------------------------------------------- */
   const [exportOpen, setExportOpen] = uS(false);
+  const [contactsOpen, setContactsOpen] = uS(false);
+  const [contactsBump, setContactsBump] = uS(0); // forces re-render after rename
   const doExport = (kind) => {
     const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     if (kind === 'json') downloadBlob(`task-tracker-${ts}.json`, JSON.stringify(tasks, null, 2), 'application/json');
@@ -143,6 +145,9 @@ function App() {
 
   /* Global search filtering --------------------------------------------- */
   const filteredTasks = uM(() => {
+    // contactsBump invalidates this memo when names change, so search by
+    // collaborator name reflects renames immediately.
+    void contactsBump;
     if (!search.trim()) return tasks;
     const q = search.toLowerCase();
     return tasks.filter(t => {
@@ -153,7 +158,7 @@ function App() {
         || (t.description || '').toLowerCase().includes(q)
         || p.includes(q) || people.includes(q) || cmts.includes(q);
     });
-  }, [tasks, search]);
+  }, [tasks, search, contactsBump]);
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -180,12 +185,13 @@ function App() {
         {view === 'all'      && <AllView      tasks={filteredTasks} onChange={update} onDelete={remove} onEdit={openEdit} />}
       </main>
 
-      <Footer tasks={tasks} />
+      <Footer tasks={tasks} onOpenContacts={() => setContactsOpen(true)} />
 
       {modalTask && (
         <TaskModal task={modalTask} onSave={upsert} onClose={() => setModalTask(null)} onDelete={remove} />
       )}
       {exportOpen && <ExportSheet onClose={() => setExportOpen(false)} onPick={doExport} />}
+      {contactsOpen && <ContactsSheet onClose={() => setContactsOpen(false)} onSaved={() => setContactsBump(n => n + 1)} />}
 
       {/* Floating FAB */}
       <button
@@ -207,7 +213,7 @@ function App() {
 }
 
 /* ─── Footer ──────────────────────────────────────────────────────────── */
-function Footer({ tasks }) {
+function Footer({ tasks, onOpenContacts }) {
   const completed = tasks.filter(t => t.status === 'done').length;
   return (
     <footer style={{
@@ -230,6 +236,14 @@ function Footer({ tasks }) {
         <KeyHint k="1-4" v="views" />
         <KeyHint k="←→" v="nav" />
         <KeyHint k="T" v="today" />
+        <button
+          onClick={onOpenContacts}
+          style={{
+            padding: '2px 8px', background: 'transparent', border: 'none',
+            color: 'var(--olive-soft)', fontFamily: 'inherit', fontSize: 10,
+            letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer',
+          }}
+        >contacts</button>
         <button
           onClick={signOut}
           style={{
@@ -307,6 +321,132 @@ function ExportSheet({ onClose, onPick }) {
     </div>
   );
 }
+
+/* ─── Contacts sheet ──────────────────────────────────────────────────── */
+function ContactsSheet({ onClose, onSaved }) {
+  // Snapshot PEOPLE into local editable state. PEOPLE itself is the source
+  // of truth elsewhere; we only mutate it via updateContact() on save.
+  const [rows, setRows] = uS(() => PEOPLE.map(p => ({ ...p })));
+  const [savingId, setSavingId] = uS(null);
+  const [err, setErr] = uS('');
+
+  const setField = (id, key, value) => {
+    setRows(rs => rs.map(r => r.id === id ? { ...r, [key]: value } : r));
+  };
+
+  const save = async (row) => {
+    setErr(''); setSavingId(row.id);
+    try {
+      const original = PEOPLE.find(p => p.id === row.id);
+      const patch = {};
+      if (row.name !== original.name) patch.name = row.name.trim();
+      if (row.initials !== original.initials) patch.initials = row.initials.trim().toUpperCase().slice(0, 3);
+      if (row.color !== original.color) patch.color = row.color;
+      if (Object.keys(patch).length === 0) { setSavingId(null); return; }
+      await updateContact(row.id, patch);
+      onSaved && onSaved();
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, background: 'color-mix(in oklab, var(--olive-deep) 55%, transparent)',
+      backdropFilter: 'blur(6px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 20,
+      animation: 'fadein 160ms ease',
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: 560, maxWidth: '100%', maxHeight: '85vh', overflowY: 'auto',
+        background: 'var(--cream)', borderRadius: 18,
+        boxShadow: '0 24px 60px color-mix(in oklab, var(--olive-deep) 35%, transparent)',
+        animation: 'slidein 220ms ease both',
+      }}>
+        <div style={{ padding: '16px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span className="mono" style={{ fontSize: 11, color: 'var(--olive-soft)', letterSpacing: '0.08em', fontWeight: 600 }}>CONTACTS</span>
+          <button onClick={onClose} style={{
+            width: 30, height: 30, padding: 0, border: 'none', borderRadius: 8, background: 'var(--cream-2)', color: 'var(--olive)', fontSize: 16,
+          }}>✕</button>
+        </div>
+        <div style={{ padding: '0 22px 22px' }}>
+          <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 6, color: 'var(--ink)', letterSpacing: '-0.02em' }}>
+            Edit collaborators
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--olive-soft)', marginBottom: 16 }}>
+            Rename anyone in your contact list. Changes apply across all your tasks.
+          </div>
+          {err && (
+            <div style={{
+              marginBottom: 12, padding: '8px 12px', fontSize: 12,
+              background: 'color-mix(in oklab, var(--danger) 12%, var(--cream-2))',
+              color: 'var(--danger)', borderRadius: 8,
+            }}>{err}</div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {rows.map(r => {
+              const dirty = (() => {
+                const o = PEOPLE.find(p => p.id === r.id);
+                return o && (o.name !== r.name || o.initials !== r.initials || o.color !== r.color);
+              })();
+              return (
+                <div key={r.id} style={{
+                  display: 'grid',
+                  gridTemplateColumns: '34px 1fr 64px 32px auto',
+                  gap: 8, alignItems: 'center',
+                  padding: 10, background: 'var(--cream-2)', borderRadius: 12,
+                }}>
+                  <span style={{
+                    width: 30, height: 30, borderRadius: '50%',
+                    background: r.color, color: 'white',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 11, fontWeight: 700, letterSpacing: '0.04em',
+                  }}>{r.initials}</span>
+                  <input
+                    value={r.name}
+                    onChange={e => setField(r.id, 'name', e.target.value)}
+                    style={inlineInput}
+                  />
+                  <input
+                    value={r.initials}
+                    maxLength={3}
+                    onChange={e => setField(r.id, 'initials', e.target.value.toUpperCase())}
+                    style={{ ...inlineInput, textAlign: 'center', fontFamily: 'var(--font-mono)', letterSpacing: '0.08em' }}
+                  />
+                  <input
+                    type="color"
+                    value={r.color}
+                    onChange={e => setField(r.id, 'color', e.target.value)}
+                    style={{ width: 32, height: 32, padding: 0, border: 'none', background: 'transparent', cursor: 'pointer' }}
+                  />
+                  <button
+                    onClick={() => save(r)}
+                    disabled={!dirty || savingId === r.id}
+                    style={{
+                      padding: '6px 12px', border: 'none', borderRadius: 8,
+                      background: dirty ? 'var(--accent)' : 'transparent',
+                      color: dirty ? 'white' : 'var(--olive-soft)',
+                      fontSize: 12, fontWeight: 700,
+                      cursor: dirty ? 'pointer' : 'default',
+                      opacity: savingId === r.id ? 0.6 : 1,
+                    }}
+                  >{savingId === r.id ? '…' : 'Save'}</button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+const inlineInput = {
+  padding: '8px 10px',
+  background: 'var(--cream)', border: 'none', borderRadius: 8,
+  fontSize: 14, color: 'var(--ink)', minWidth: 0,
+};
 
 /* ─── Markdown review (AI-ready: includes description + comments) ─────── */
 function renderMarkdownReview(tasks, start, end, kind) {
