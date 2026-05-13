@@ -3,8 +3,9 @@ import React, { useState as uS, useEffect as uE, useMemo as uM, useCallback as u
 import { createRoot } from 'react-dom/client';
 import {
   PROJECTS, PEOPLE,
-  addDays, downloadBlob, fmtLong, fmtShort, loadContacts, loadTasks, personById, projectById,
+  addDays, downloadBlob, fmtLong, fmtShort, loadContacts, loadProjects, loadTasks, personById, projectById,
   upsertTask, deleteTask, updateContact, createContact, deleteContact,
+  createProject, updateProject, deleteProject,
   startOfMonth, startOfWeek, toCSV, toISODate,
 } from './data.js';
 import { Header, StatStrip, TaskModal } from './components.jsx';
@@ -37,6 +38,10 @@ function App() {
     (async () => {
       try {
         await loadContacts();
+        // Projects load is best-effort: if the table doesn't exist yet
+        // (migration not run), fall back to hardcoded defaults.
+        try { await loadProjects(); }
+        catch (e) { console.warn('Projects table not ready:', e.message); }
         const t = await loadTasks();
         if (!cancelled) setTasks(t);
       } catch (e) {
@@ -130,6 +135,8 @@ function App() {
   const [exportOpen, setExportOpen] = uS(false);
   const [contactsOpen, setContactsOpen] = uS(false);
   const [contactsBump, setContactsBump] = uS(0); // forces re-render after rename
+  const [projectsOpen, setProjectsOpen] = uS(false);
+  const [projectsBump, setProjectsBump] = uS(0);
   const doExport = (kind) => {
     const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     if (kind === 'json') downloadBlob(`task-tracker-${ts}.json`, JSON.stringify(tasks, null, 2), 'application/json');
@@ -155,9 +162,9 @@ function App() {
 
   /* Global search filtering --------------------------------------------- */
   const filteredTasks = uM(() => {
-    // contactsBump invalidates this memo when names change, so search by
-    // collaborator name reflects renames immediately.
-    void contactsBump;
+    // contactsBump/projectsBump invalidate this memo when labels change, so
+    // search by collaborator or project name reflects renames immediately.
+    void contactsBump; void projectsBump;
     if (!search.trim()) return tasks;
     const q = search.toLowerCase();
     return tasks.filter(t => {
@@ -168,7 +175,7 @@ function App() {
         || (t.description || '').toLowerCase().includes(q)
         || p.includes(q) || people.includes(q) || cmts.includes(q);
     });
-  }, [tasks, search, contactsBump]);
+  }, [tasks, search, contactsBump, projectsBump]);
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -198,13 +205,26 @@ function App() {
         </div>
       </main>
 
-      <Footer tasks={tasks} onOpenContacts={() => setContactsOpen(true)} />
+      <Footer
+        tasks={tasks}
+        onOpenContacts={() => setContactsOpen(true)}
+        onOpenProjects={() => setProjectsOpen(true)}
+      />
 
       {modalTask && (
         <TaskModal task={modalTask} onSave={upsert} onClose={() => setModalTask(null)} onDelete={remove} />
       )}
       {exportOpen && <ExportSheet onClose={() => setExportOpen(false)} onPick={doExport} />}
       {contactsOpen && <ContactsSheet onClose={() => setContactsOpen(false)} onSaved={() => setContactsBump(n => n + 1)} />}
+      {projectsOpen && <ProjectsSheet
+        onClose={() => setProjectsOpen(false)}
+        onSaved={() => setProjectsBump(n => n + 1)}
+        onDeleted={(deletedId) => {
+          // Re-home local tasks to inbox so the UI stays in sync without a refresh.
+          setTasks(prev => prev.map(t => t.project === deletedId ? { ...t, project: 'inbox' } : t));
+          setProjectsBump(n => n + 1);
+        }}
+      />}
 
       {/* Floating FAB */}
       <button
@@ -216,17 +236,19 @@ function App() {
           background: 'var(--accent)', color: 'white',
           border: 'none', boxShadow: '0 10px 24px color-mix(in oklab, var(--accent) 45%, transparent)',
           fontSize: 28, lineHeight: 1, fontWeight: 300,
-          transition: 'transform 140ms ease, box-shadow 140ms ease',
+          transition: 'transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 180ms ease',
         }}
-        onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px) scale(1.04)'; }}
-        onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0) scale(1)'; }}
+        onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px) scale(1.06)'; e.currentTarget.style.boxShadow = '0 14px 30px color-mix(in oklab, var(--accent) 55%, transparent)'; }}
+        onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0) scale(1)'; e.currentTarget.style.boxShadow = '0 10px 24px color-mix(in oklab, var(--accent) 45%, transparent)'; }}
+        onMouseDown={e => { e.currentTarget.style.transform = 'translateY(-1px) scale(0.96)'; }}
+        onMouseUp={e => { e.currentTarget.style.transform = 'translateY(-3px) scale(1.06)'; }}
       >+</button>
     </div>
   );
 }
 
 /* ─── Footer ──────────────────────────────────────────────────────────── */
-function Footer({ tasks, onOpenContacts }) {
+function Footer({ tasks, onOpenContacts, onOpenProjects }) {
   const completed = tasks.filter(t => t.status === 'done').length;
   return (
     <footer style={{
@@ -249,24 +271,29 @@ function Footer({ tasks, onOpenContacts }) {
         <KeyHint k="1-4" v="views" />
         <KeyHint k="←→" v="nav" />
         <KeyHint k="T" v="today" />
-        <button
-          onClick={onOpenContacts}
-          style={{
-            padding: '2px 8px', background: 'transparent', border: 'none',
-            color: 'var(--olive-soft)', fontFamily: 'inherit', fontSize: 10,
-            letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer',
-          }}
-        >contacts</button>
-        <button
-          onClick={signOut}
-          style={{
-            padding: '2px 8px', background: 'transparent', border: 'none',
-            color: 'var(--olive-soft)', fontFamily: 'inherit', fontSize: 10,
-            letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer',
-          }}
-        >sign out</button>
+        <FooterLink onClick={onOpenProjects}>projects</FooterLink>
+        <FooterLink onClick={onOpenContacts}>contacts</FooterLink>
+        <FooterLink onClick={signOut}>sign out</FooterLink>
       </div>
     </footer>
+  );
+}
+
+function FooterLink({ onClick, children }) {
+  const [hover, setHover] = uS(false);
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        padding: '2px 8px', background: 'transparent', border: 'none',
+        color: hover ? 'var(--accent)' : 'var(--olive-soft)',
+        fontFamily: 'inherit', fontSize: 10,
+        letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer',
+        transition: 'color 140ms ease',
+      }}
+    >{children}</button>
   );
 }
 function KeyHint({ k, v }) {
@@ -523,6 +550,184 @@ const inlineInput = {
   background: 'var(--cream)', border: 'none', borderRadius: 8,
   fontSize: 14, color: 'var(--ink)', minWidth: 0,
 };
+
+/* ─── Projects sheet ──────────────────────────────────────────────────── */
+function ProjectsSheet({ onClose, onSaved, onDeleted }) {
+  const [rows, setRows] = uS(() => PROJECTS.map(p => ({ ...p })));
+  const [savingId, setSavingId] = uS(null);
+  const [busy, setBusy] = uS(false);
+  const [err, setErr] = uS('');
+
+  const setField = (id, key, value) => {
+    setRows(rs => rs.map(r => r.id === id ? { ...r, [key]: value } : r));
+  };
+
+  const save = async (row) => {
+    setErr(''); setSavingId(row.id);
+    try {
+      const original = PROJECTS.find(p => p.id === row.id);
+      const patch = {};
+      if (row.label !== original.label) patch.label = row.label.trim();
+      if (row.color !== original.color) patch.color = row.color;
+      if (Object.keys(patch).length === 0) { setSavingId(null); return; }
+      await updateProject(row.id, patch);
+      onSaved && onSaved();
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const add = async () => {
+    setErr(''); setBusy(true);
+    try {
+      const p = await createProject({ label: 'New project' });
+      // Insert before any 'inbox' row in local state.
+      setRows(rs => {
+        const inboxIdx = rs.findIndex(r => r.id === 'inbox');
+        const justAdded = { ...p, _justAdded: true };
+        if (inboxIdx >= 0) return [...rs.slice(0, inboxIdx), justAdded, ...rs.slice(inboxIdx)];
+        return [...rs, justAdded];
+      });
+      onSaved && onSaved();
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (id) => {
+    if (!confirm('Delete this project? Tasks tagged with it will be moved to Inbox.')) return;
+    setErr(''); setBusy(true);
+    try {
+      await deleteProject(id);
+      setRows(rs => rs.filter(r => r.id !== id));
+      onDeleted && onDeleted(id);
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, background: 'color-mix(in oklab, var(--olive-deep) 55%, transparent)',
+      backdropFilter: 'blur(6px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 20,
+      animation: 'fadein 160ms ease',
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: 560, maxWidth: '100%', maxHeight: '85vh', overflowY: 'auto',
+        background: 'var(--cream)', borderRadius: 18,
+        boxShadow: '0 24px 60px color-mix(in oklab, var(--olive-deep) 35%, transparent)',
+        animation: 'slidein 220ms ease both',
+      }}>
+        <div style={{ padding: '16px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span className="mono" style={{ fontSize: 11, color: 'var(--olive-soft)', letterSpacing: '0.08em', fontWeight: 600 }}>
+            PROJECTS · {rows.length}
+          </span>
+          <button onClick={onClose} style={{
+            width: 30, height: 30, padding: 0, border: 'none', borderRadius: 8, background: 'var(--cream-2)', color: 'var(--olive)', fontSize: 16,
+          }}>✕</button>
+        </div>
+        <div style={{ padding: '0 22px 22px' }}>
+          <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 6, color: 'var(--ink)', letterSpacing: '-0.02em' }}>
+            Edit project buckets
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--olive-soft)', marginBottom: 16 }}>
+            Rename, recolor, add, or remove buckets. Deleting moves any tasks in that bucket to Inbox.
+          </div>
+          {err && (
+            <div style={{
+              marginBottom: 12, padding: '8px 12px', fontSize: 12,
+              background: 'color-mix(in oklab, var(--danger) 12%, var(--cream-2))',
+              color: 'var(--danger)', borderRadius: 8,
+            }}>{err}</div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {rows.map((r, i) => {
+              const dirty = (() => {
+                const o = PROJECTS.find(p => p.id === r.id);
+                return o && (o.label !== r.label || o.color !== r.color);
+              })();
+              const canDelete = r.id !== 'inbox';
+              return (
+                <div key={r.id} style={{
+                  display: 'grid',
+                  gridTemplateColumns: '14px 1fr 32px auto 28px',
+                  gap: 10, alignItems: 'center',
+                  padding: 10, background: 'var(--cream-2)', borderRadius: 12,
+                  animation: r._justAdded ? 'slidein 260ms ease both' : `slidein 260ms ease ${Math.min(i * 28, 280)}ms both`,
+                }}>
+                  <span style={{
+                    width: 12, height: 12, borderRadius: 3, background: r.color,
+                    transition: 'background 200ms ease',
+                  }} />
+                  <input
+                    value={r.label}
+                    onChange={e => setField(r.id, 'label', e.target.value)}
+                    style={inlineInput}
+                  />
+                  <input
+                    type="color"
+                    value={r.color}
+                    onChange={e => setField(r.id, 'color', e.target.value)}
+                    style={{ width: 32, height: 32, padding: 0, border: 'none', background: 'transparent', cursor: 'pointer' }}
+                  />
+                  <button
+                    onClick={() => save(r)}
+                    disabled={!dirty || savingId === r.id}
+                    style={{
+                      padding: '6px 12px', border: 'none', borderRadius: 8,
+                      background: dirty ? 'var(--accent)' : 'transparent',
+                      color: dirty ? 'white' : 'var(--olive-soft)',
+                      fontSize: 12, fontWeight: 700,
+                      cursor: dirty ? 'pointer' : 'default',
+                      opacity: savingId === r.id ? 0.6 : 1,
+                      transition: 'background 160ms ease, transform 120ms ease',
+                    }}
+                  >{savingId === r.id ? '…' : 'Save'}</button>
+                  {canDelete ? (
+                    <button
+                      onClick={() => remove(r.id)}
+                      title="Delete project"
+                      style={{
+                        width: 28, height: 28, padding: 0,
+                        background: 'transparent', border: 'none', borderRadius: 6,
+                        color: 'var(--olive-soft)', fontSize: 14, cursor: 'pointer',
+                        transition: 'background 140ms ease, color 140ms ease',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = 'color-mix(in oklab, var(--danger) 14%, transparent)'; e.currentTarget.style.color = 'var(--danger)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--olive-soft)'; }}
+                    >✕</button>
+                  ) : <span />}
+                </div>
+              );
+            })}
+          </div>
+          <button
+            onClick={add}
+            disabled={busy}
+            style={{
+              marginTop: 12, width: '100%', padding: '12px 16px',
+              background: 'transparent',
+              border: '1px dashed color-mix(in oklab, var(--olive) 30%, transparent)',
+              borderRadius: 12,
+              color: 'var(--olive-soft)', fontSize: 13, fontWeight: 600,
+              cursor: busy ? 'default' : 'pointer',
+              transition: 'background 140ms ease, border-color 140ms ease, color 140ms ease',
+            }}
+            onMouseEnter={e => { if (!busy) { e.currentTarget.style.background = 'var(--cream-2)'; e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.borderColor = 'var(--accent)'; } }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--olive-soft)'; e.currentTarget.style.borderColor = 'color-mix(in oklab, var(--olive) 30%, transparent)'; }}
+          >+ Add project</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /* ─── Markdown review (AI-ready: includes description + comments) ─────── */
 function renderMarkdownReview(tasks, start, end, kind) {

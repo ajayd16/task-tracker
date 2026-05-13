@@ -2,6 +2,9 @@
 import { supabase } from './supabaseClient.js';
 
 /* Constants that don't depend on the user --------------------------------- */
+
+/* PROJECTS is loaded from the DB at startup like PEOPLE. The initial values
+   are a fallback so projectById() doesn't crash during the first render. */
 const PROJECTS = [
   { id: 'dashboard', label: 'Dashboard v1',  color: '#2E5BFF' },
   { id: 'okrs',      label: 'Q3 OKRs',        color: '#7A3FE0' },
@@ -10,6 +13,10 @@ const PROJECTS = [
   { id: 'home',      label: 'Home & Admin',   color: '#C13B3B' },
   { id: 'inbox',     label: 'Inbox',          color: '#4A5E80' },
 ];
+function setProjects(list) {
+  PROJECTS.length = 0;
+  PROJECTS.push(...list);
+}
 
 const PRIORITIES = [
   { id: 'low',  label: 'LOW',  rank: 1 },
@@ -67,8 +74,12 @@ function relTime(iso) {
 
 function uid(prefix = 'T') { return prefix + '-' + Math.random().toString(36).slice(2, 7).toUpperCase(); }
 
-function personById(id) { return PEOPLE.find(p => p.id === id) || PEOPLE[0]; }
-function projectById(id) { return PROJECTS.find(p => p.id === id) || PROJECTS[PROJECTS.length - 1]; }
+function personById(id) { return PEOPLE.find(p => p.id === id) || PEOPLE[0] || { id: 'me', name: 'You', initials: 'YO', color: '#0B1F3D' }; }
+function projectById(id) {
+  return PROJECTS.find(p => p.id === id)
+    || PROJECTS[PROJECTS.length - 1]
+    || { id: 'inbox', label: 'Inbox', color: '#4A5E80' };
+}
 
 /* Row -> app-shape converter. Components were built around this shape, so we
    keep it identical to the localStorage version. */
@@ -100,6 +111,71 @@ async function loadContacts() {
   if (error) throw error;
   setPeople(data.map(c => ({ id: c.id, name: c.name, initials: c.initials, color: c.color })));
   return data;
+}
+
+async function loadProjects() {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('id, label, color, sort_order')
+    .order('sort_order', { ascending: true });
+  if (error) throw error;
+  if (!data || data.length === 0) {
+    // Table empty (migration not yet run, or table missing). Keep the hardcoded
+    // defaults so the app stays usable. Edits would fail until migration runs.
+    return PROJECTS.slice();
+  }
+  const arr = data.map(p => ({ id: p.id, label: p.label, color: p.color }));
+  arr.sort((a, b) => (a.id === 'inbox') - (b.id === 'inbox'));
+  setProjects(arr);
+  return arr;
+}
+
+const PROJECT_COLORS = ['#2E5BFF', '#7A3FE0', '#1F8A5B', '#E07A1F', '#C13B3B', '#4A5E80', '#0B8FB6', '#B6580B', '#9B2C8E'];
+
+async function createProject({ label, color }) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in');
+  const cleanLabel = (label || '').trim() || 'New project';
+  const cleanColor = color || PROJECT_COLORS[Math.floor(Math.random() * PROJECT_COLORS.length)];
+  const id = 'p-' + Math.random().toString(36).slice(2, 7);
+  // Place new project just before Inbox.
+  const inboxIdx = PROJECTS.findIndex(p => p.id === 'inbox');
+  const sort_order = (inboxIdx >= 0 ? inboxIdx : PROJECTS.length) * 10 - 1;
+  const row = { id, owner_id: user.id, label: cleanLabel, color: cleanColor, sort_order };
+  const { data, error } = await supabase.from('projects').insert(row).select().single();
+  if (error) throw error;
+  const project = { id: data.id, label: data.label, color: data.color };
+  // Insert before inbox in the local array
+  if (inboxIdx >= 0) PROJECTS.splice(inboxIdx, 0, project);
+  else PROJECTS.push(project);
+  return project;
+}
+
+async function updateProject(id, fields) {
+  const patch = {};
+  if (fields.label != null) patch.label = fields.label.trim();
+  if (fields.color != null) patch.color = fields.color;
+  if (Object.keys(patch).length === 0) return PROJECTS.find(p => p.id === id);
+  const { data, error } = await supabase
+    .from('projects').update(patch).eq('id', id).select().single();
+  if (error) throw error;
+  const idx = PROJECTS.findIndex(p => p.id === id);
+  if (idx >= 0) PROJECTS[idx] = { id: data.id, label: data.label, color: data.color };
+  return PROJECTS[idx];
+}
+
+async function deleteProject(id) {
+  if (id === 'inbox') throw new Error("Inbox can't be deleted.");
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in');
+  // Re-home any tasks to inbox first (RLS-safe because we're the owner).
+  const { error: reErr } = await supabase
+    .from('tasks').update({ project: 'inbox' }).eq('owner_id', user.id).eq('project', id);
+  if (reErr) throw reErr;
+  const { error } = await supabase.from('projects').delete().eq('id', id);
+  if (error) throw error;
+  const idx = PROJECTS.findIndex(p => p.id === id);
+  if (idx >= 0) PROJECTS.splice(idx, 1);
 }
 
 async function loadTasks() {
@@ -246,7 +322,9 @@ export {
   PROJECTS, PEOPLE, PRIORITIES, STATUSES,
   toISODate, todayISO, addDays, startOfWeek, startOfMonth, fmtLong, fmtShort, dayName, relTime,
   uid,
-  loadContacts, loadTasks, upsertTask, deleteTask, addComment, updateContact, createContact, deleteContact,
+  loadContacts, loadProjects, loadTasks, upsertTask, deleteTask, addComment,
+  updateContact, createContact, deleteContact,
+  createProject, updateProject, deleteProject,
   toCSV, downloadBlob,
   personById, projectById,
 };

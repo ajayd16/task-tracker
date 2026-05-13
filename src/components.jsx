@@ -20,8 +20,9 @@ function ProjectChip({ id, size = 'sm' }) {
       borderRadius: 999,
       letterSpacing: '-0.005em',
       whiteSpace: 'nowrap',
+      transition: 'background 220ms ease, border-color 220ms ease, color 220ms ease',
     }}>
-      <span style={{ width: 6, height: 6, borderRadius: '50%', background: p.color }} />
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: p.color, transition: 'background 220ms ease' }} />
       {p.label}
     </span>
   );
@@ -538,11 +539,16 @@ function Header({ view, setView, onNew, onExport, dateLabel, onPrev, onNext, onT
                   fontWeight: active ? 800 : 600, fontSize: 14, letterSpacing: '-0.01em',
                   position: 'relative',
                   cursor: 'pointer',
+                  transition: 'color 180ms ease',
                 }}
               >
                 {v.label}
                 {active && (
-                  <span style={{ position: 'absolute', bottom: -1, left: 14, right: 14, height: 2, background: 'var(--accent)', borderRadius: 2 }} />
+                  <span style={{
+                    position: 'absolute', bottom: -1, left: 14, right: 14, height: 2,
+                    background: 'var(--accent)', borderRadius: 2,
+                    animation: 'slidein 220ms ease both',
+                  }} />
                 )}
               </button>
             );
@@ -575,7 +581,14 @@ function Header({ view, setView, onNew, onExport, dateLabel, onPrev, onNext, onT
           )}
           {showNav && (
             <>
-              <span className="serif" style={{ fontSize: 20, fontStyle: 'italic', color: 'var(--ink)' }}>{dateLabel}</span>
+              <span style={{
+                fontFamily: 'var(--font-display)',
+                fontSize: 17,
+                fontWeight: 700,
+                letterSpacing: '-0.02em',
+                color: 'var(--ink)',
+                fontVariantNumeric: 'tabular-nums',
+              }}>{dateLabel}</span>
               <div style={{ display: 'flex', gap: 4 }}>
                 <NavBtn onClick={onPrev}>‹</NavBtn>
                 <NavBtn onClick={onToday}>Today</NavBtn>
