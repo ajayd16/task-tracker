@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import {
   PROJECTS, PEOPLE,
   addDays, downloadBlob, fmtLong, fmtShort, loadContacts, loadTasks, personById, projectById,
-  upsertTask, deleteTask, updateContact,
+  upsertTask, deleteTask, updateContact, createContact, deleteContact,
   startOfMonth, startOfWeek, toCSV, toISODate,
 } from './data.js';
 import { Header, StatStrip, TaskModal } from './components.jsx';
@@ -19,6 +19,16 @@ function App() {
   const [modalTask, setModalTask] = uS(null);
   const [search, setSearch] = uS('');
   const searchRef = uR(null);
+  // Date organization mode: 'created' (default) groups tasks by creation
+  // date; 'due' uses the original due-date logic. Persisted across reloads.
+  const [dateMode, setDateModeRaw] = uS(() => {
+    try { return localStorage.getItem('task.tracker.dateMode') || 'created'; }
+    catch { return 'created'; }
+  });
+  const setDateMode = uC((v) => {
+    setDateModeRaw(v);
+    try { localStorage.setItem('task.tracker.dateMode', v); } catch {}
+  }, []);
 
   /* Initial load: contacts first (so PEOPLE is populated before any task
      renders), then tasks. */
@@ -175,14 +185,17 @@ function App() {
         onPrev={goPrev} onNext={goNext} onToday={goToday}
         showNav={view !== 'all'}
         search={search} setSearch={setSearch} searchRef={searchRef}
+        dateMode={dateMode} setDateMode={setDateMode}
       />
-      <StatStrip tasks={tasks} />
+      <StatStrip tasks={tasks} dateMode={dateMode} />
 
       <main style={{ flex: 1 }}>
-        {view === 'today'    && <TodayView    tasks={filteredTasks} allTasks={tasks} onChange={update} onDelete={remove} onEdit={openEdit} anchorDate={anchor} />}
-        {view === 'week'     && <WeekView     tasks={filteredTasks} onChange={update} onDelete={remove} onEdit={openEdit} anchorDate={anchor} onQuickAdd={(iso) => openNew(iso)} />}
-        {view === 'calendar' && <CalendarView tasks={filteredTasks} onEdit={openEdit} anchorDate={anchor} onDayFocus={(d) => { setAnchor(d); setView('today'); }} />}
-        {view === 'all'      && <AllView      tasks={filteredTasks} onChange={update} onDelete={remove} onEdit={openEdit} />}
+        <div key={view + ':' + dateMode} style={{ animation: 'viewfade 280ms cubic-bezier(0.16, 1, 0.3, 1) both' }}>
+          {view === 'today'    && <TodayView    tasks={filteredTasks} allTasks={tasks} onChange={update} onDelete={remove} onEdit={openEdit} anchorDate={anchor} dateMode={dateMode} />}
+          {view === 'week'     && <WeekView     tasks={filteredTasks} onChange={update} onDelete={remove} onEdit={openEdit} anchorDate={anchor} onQuickAdd={(iso) => openNew(iso)} dateMode={dateMode} />}
+          {view === 'calendar' && <CalendarView tasks={filteredTasks} onEdit={openEdit} anchorDate={anchor} onDayFocus={(d) => { setAnchor(d); setView('today'); }} dateMode={dateMode} />}
+          {view === 'all'      && <AllView      tasks={filteredTasks} onChange={update} onDelete={remove} onEdit={openEdit} dateMode={dateMode} />}
+        </div>
       </main>
 
       <Footer tasks={tasks} onOpenContacts={() => setContactsOpen(true)} />
@@ -325,9 +338,10 @@ function ExportSheet({ onClose, onPick }) {
 /* ─── Contacts sheet ──────────────────────────────────────────────────── */
 function ContactsSheet({ onClose, onSaved }) {
   // Snapshot PEOPLE into local editable state. PEOPLE itself is the source
-  // of truth elsewhere; we only mutate it via updateContact() on save.
+  // of truth elsewhere; we only mutate it via updateContact/createContact/deleteContact.
   const [rows, setRows] = uS(() => PEOPLE.map(p => ({ ...p })));
   const [savingId, setSavingId] = uS(null);
+  const [busy, setBusy] = uS(false);
   const [err, setErr] = uS('');
 
   const setField = (id, key, value) => {
@@ -352,6 +366,33 @@ function ContactsSheet({ onClose, onSaved }) {
     }
   };
 
+  const add = async () => {
+    setErr(''); setBusy(true);
+    try {
+      const c = await createContact({ name: 'New contact' });
+      setRows(rs => [...rs, { ...c, _justAdded: true }]);
+      onSaved && onSaved();
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (id) => {
+    if (!confirm('Delete this contact? They will be removed from all your tasks.')) return;
+    setErr(''); setBusy(true);
+    try {
+      await deleteContact(id);
+      setRows(rs => rs.filter(r => r.id !== id));
+      onSaved && onSaved();
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div onClick={onClose} style={{
       position: 'fixed', inset: 0, background: 'color-mix(in oklab, var(--olive-deep) 55%, transparent)',
@@ -360,13 +401,15 @@ function ContactsSheet({ onClose, onSaved }) {
       animation: 'fadein 160ms ease',
     }}>
       <div onClick={e => e.stopPropagation()} style={{
-        width: 560, maxWidth: '100%', maxHeight: '85vh', overflowY: 'auto',
+        width: 600, maxWidth: '100%', maxHeight: '85vh', overflowY: 'auto',
         background: 'var(--cream)', borderRadius: 18,
         boxShadow: '0 24px 60px color-mix(in oklab, var(--olive-deep) 35%, transparent)',
         animation: 'slidein 220ms ease both',
       }}>
         <div style={{ padding: '16px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span className="mono" style={{ fontSize: 11, color: 'var(--olive-soft)', letterSpacing: '0.08em', fontWeight: 600 }}>CONTACTS</span>
+          <span className="mono" style={{ fontSize: 11, color: 'var(--olive-soft)', letterSpacing: '0.08em', fontWeight: 600 }}>
+            CONTACTS · {rows.length}
+          </span>
           <button onClick={onClose} style={{
             width: 30, height: 30, padding: 0, border: 'none', borderRadius: 8, background: 'var(--cream-2)', color: 'var(--olive)', fontSize: 16,
           }}>✕</button>
@@ -376,7 +419,7 @@ function ContactsSheet({ onClose, onSaved }) {
             Edit collaborators
           </div>
           <div style={{ fontSize: 12, color: 'var(--olive-soft)', marginBottom: 16 }}>
-            Rename anyone in your contact list. Changes apply across all your tasks.
+            Rename, recolor, add, or remove people. Changes apply across all your tasks.
           </div>
           {err && (
             <div style={{
@@ -386,23 +429,26 @@ function ContactsSheet({ onClose, onSaved }) {
             }}>{err}</div>
           )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {rows.map(r => {
+            {rows.map((r, i) => {
               const dirty = (() => {
                 const o = PEOPLE.find(p => p.id === r.id);
                 return o && (o.name !== r.name || o.initials !== r.initials || o.color !== r.color);
               })();
+              const canDelete = r.id !== 'me';
               return (
                 <div key={r.id} style={{
                   display: 'grid',
-                  gridTemplateColumns: '34px 1fr 64px 32px auto',
+                  gridTemplateColumns: '34px 1fr 64px 32px auto 28px',
                   gap: 8, alignItems: 'center',
                   padding: 10, background: 'var(--cream-2)', borderRadius: 12,
+                  animation: r._justAdded ? 'slidein 260ms ease both' : `slidein 260ms ease ${Math.min(i * 28, 280)}ms both`,
                 }}>
                   <span style={{
                     width: 30, height: 30, borderRadius: '50%',
                     background: r.color, color: 'white',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontSize: 11, fontWeight: 700, letterSpacing: '0.04em',
+                    transition: 'background 200ms ease',
                   }}>{r.initials}</span>
                   <input
                     value={r.name}
@@ -431,12 +477,42 @@ function ContactsSheet({ onClose, onSaved }) {
                       fontSize: 12, fontWeight: 700,
                       cursor: dirty ? 'pointer' : 'default',
                       opacity: savingId === r.id ? 0.6 : 1,
+                      transition: 'background 160ms ease, transform 120ms ease',
                     }}
                   >{savingId === r.id ? '…' : 'Save'}</button>
+                  {canDelete ? (
+                    <button
+                      onClick={() => remove(r.id)}
+                      title="Delete contact"
+                      style={{
+                        width: 28, height: 28, padding: 0,
+                        background: 'transparent', border: 'none', borderRadius: 6,
+                        color: 'var(--olive-soft)', fontSize: 14, cursor: 'pointer',
+                        transition: 'background 140ms ease, color 140ms ease',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = 'color-mix(in oklab, var(--danger) 14%, transparent)'; e.currentTarget.style.color = 'var(--danger)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--olive-soft)'; }}
+                    >✕</button>
+                  ) : <span />}
                 </div>
               );
             })}
           </div>
+          <button
+            onClick={add}
+            disabled={busy}
+            style={{
+              marginTop: 12, width: '100%', padding: '12px 16px',
+              background: 'transparent',
+              border: '1px dashed color-mix(in oklab, var(--olive) 30%, transparent)',
+              borderRadius: 12,
+              color: 'var(--olive-soft)', fontSize: 13, fontWeight: 600,
+              cursor: busy ? 'default' : 'pointer',
+              transition: 'background 140ms ease, border-color 140ms ease, color 140ms ease',
+            }}
+            onMouseEnter={e => { if (!busy) { e.currentTarget.style.background = 'var(--cream-2)'; e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.borderColor = 'var(--accent)'; } }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--olive-soft)'; e.currentTarget.style.borderColor = 'color-mix(in oklab, var(--olive) 30%, transparent)'; }}
+          >+ Add contact</button>
         </div>
       </div>
     </div>

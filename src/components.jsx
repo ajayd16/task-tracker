@@ -83,9 +83,16 @@ function AvatarStack({ ids, size = 22, max = 4 }) {
 /* ─── Status toggle ────────────────────────────────────────────────────── */
 function StatusToggle({ status, onChange, size = 22 }) {
   const next = status === 'todo' ? 'doing' : status === 'doing' ? 'done' : 'todo';
+  const [popping, setPopping] = useState(false);
+  const handleClick = (e) => {
+    e.stopPropagation();
+    setPopping(true);
+    setTimeout(() => setPopping(false), 280);
+    onChange(next);
+  };
   return (
     <button
-      onClick={(e) => { e.stopPropagation(); onChange(next); }}
+      onClick={handleClick}
       title={`${status.toUpperCase()} → click to cycle`}
       style={{
         width: size, height: size, padding: 0,
@@ -95,6 +102,7 @@ function StatusToggle({ status, onChange, size = 22 }) {
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
         flexShrink: 0,
         transition: 'all 140ms ease',
+        animation: popping ? 'pop 280ms ease' : undefined,
       }}
     >
       {status === 'doing' && (
@@ -128,8 +136,9 @@ function TaskRow({ task, onChange, onDelete, onEdit }) {
         borderRadius: 14,
         marginBottom: 8,
         cursor: 'pointer',
-        transition: 'background 140ms ease, transform 140ms ease',
-        boxShadow: hover ? '0 2px 12px color-mix(in oklab, var(--olive) 8%, transparent)' : 'none',
+        transition: 'background 140ms ease, transform 160ms ease, box-shadow 160ms ease',
+        boxShadow: hover ? '0 6px 18px color-mix(in oklab, var(--olive) 10%, transparent)' : 'none',
+        transform: hover ? 'translateY(-1px)' : 'translateY(0)',
         animation: 'slidein 220ms ease both',
       }}
     >
@@ -463,7 +472,7 @@ function SegmentedControl({ value, onChange, options }) {
 }
 
 /* ─── Header / View switcher / Search / Stat strip ─────────────────────── */
-function Header({ view, setView, onNew, onExport, dateLabel, onPrev, onNext, onToday, showNav, search, setSearch, searchRef }) {
+function Header({ view, setView, onNew, onExport, dateLabel, onPrev, onNext, onToday, showNav, search, setSearch, searchRef, dateMode, setDateMode }) {
   const views = [
     { id: 'today',    label: 'Today' },
     { id: 'week',     label: 'Week' },
@@ -541,6 +550,29 @@ function Header({ view, setView, onNew, onExport, dateLabel, onPrev, onNext, onT
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, paddingBottom: 8 }}>
+          {setDateMode && (
+            <div style={{ display: 'inline-flex', background: 'var(--cream-2)', borderRadius: 9, padding: 3 }}>
+              {[['created','Created'],['due','Due']].map(([v, l]) => {
+                const active = dateMode === v;
+                return (
+                  <button
+                    key={v}
+                    onClick={() => setDateMode(v)}
+                    title={`Organize by ${l.toLowerCase()} date`}
+                    style={{
+                      padding: '5px 10px', fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
+                      border: 'none', borderRadius: 7,
+                      background: active ? 'var(--ink)' : 'transparent',
+                      color: active ? 'var(--cream)' : 'var(--olive-soft)',
+                      cursor: 'pointer',
+                      transition: 'background 160ms ease, color 160ms ease',
+                      textTransform: 'uppercase',
+                    }}
+                  >{l}</button>
+                );
+              })}
+            </div>
+          )}
           {showNav && (
             <>
               <span className="serif" style={{ fontSize: 20, fontStyle: 'italic', color: 'var(--ink)' }}>{dateLabel}</span>
@@ -602,16 +634,22 @@ function Ticker() {
   );
 }
 
-function StatStrip({ tasks }) {
+function StatStrip({ tasks, dateMode = 'due' }) {
   const stats = useMemo(() => {
     const today = todayISO();
-    const todayTasks = tasks.filter(t => t.due === today);
+    const keyOf = (t) => dateMode === 'created' ? (t.createdAt || '').slice(0, 10) : t.due;
+    const todayTasks = tasks.filter(t => keyOf(t) === today);
     const todayDone  = todayTasks.filter(t => t.status === 'done').length;
     const weekStart  = startOfWeek(new Date());
     const weekEnd    = addDays(weekStart, 7);
-    const inWeek     = tasks.filter(t => { const d = new Date(t.due); return d >= weekStart && d < weekEnd; });
+    const weekStartK = toISODate(weekStart);
+    const weekEndK   = toISODate(weekEnd);
+    const inWeek     = tasks.filter(t => { const k = keyOf(t); return k >= weekStartK && k < weekEndK; });
     const weekDone   = inWeek.filter(t => t.status === 'done').length;
+    // Overdue is only meaningful in due mode. In created mode, swap for "month".
     const overdue    = tasks.filter(t => t.due < today && t.status !== 'done').length;
+    const monthStartK = (() => { const d = new Date(); d.setDate(1); return toISODate(d); })();
+    const monthCount = tasks.filter(t => keyOf(t) >= monthStartK).length;
     const doing      = tasks.filter(t => t.status === 'doing').length;
     const byDay = new Map();
     tasks.filter(t => t.status === 'done' && t.completedAt).forEach(t => {
@@ -627,35 +665,66 @@ function StatStrip({ tasks }) {
       todayDone, todayTotal: todayTasks.length,
       weekPct: inWeek.length ? Math.round((weekDone / inWeek.length) * 100) : 0,
       weekDone, weekTotal: inWeek.length,
-      overdue, doing, streak,
+      overdue, monthCount, doing, streak,
     };
-  }, [tasks]);
+  }, [tasks, dateMode]);
 
   return (
     <div style={{ padding: '6px 32px 22px', display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
       <Stat label="Today" big={`${stats.todayPct}%`} sub={`${stats.todayDone} of ${stats.todayTotal} done`} bar={stats.todayPct} />
       <Stat label="This week" big={`${stats.weekPct}%`} sub={`${stats.weekDone} of ${stats.weekTotal} done`} bar={stats.weekPct} />
       <Stat label="In progress" big={stats.doing} sub="active now" />
-      <Stat label="Overdue" big={stats.overdue} sub={stats.overdue ? 'needs attention' : 'all clear'} danger={stats.overdue > 0} />
+      {dateMode === 'due'
+        ? <Stat label="Overdue" big={stats.overdue} sub={stats.overdue ? 'needs attention' : 'all clear'} danger={stats.overdue > 0} />
+        : <Stat label="This month" big={stats.monthCount} sub="created so far" />}
       <Stat label="Streak" big={`${stats.streak}d`} sub={stats.streak ? 'keep going' : 'start today'} />
     </div>
   );
 }
 
+function useTweenedNumber(target, duration = 500) {
+  const [value, setValue] = useState(target);
+  const fromRef = useRef(target);
+  const rafRef = useRef(null);
+  useEffect(() => {
+    const from = fromRef.current;
+    const to = target;
+    if (from === to) return;
+    const start = performance.now();
+    const tick = (now) => {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
+      const v = from + (to - from) * eased;
+      setValue(Number.isInteger(from) && Number.isInteger(to) ? Math.round(v) : v);
+      if (t < 1) rafRef.current = requestAnimationFrame(tick);
+      else fromRef.current = to;
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [target, duration]);
+  return value;
+}
+
 function Stat({ label, big, sub, bar, danger }) {
+  // Tween only when the value is a number; pass-through otherwise.
+  const isNumber = typeof big === 'number' || (typeof big === 'string' && /^\d+$/.test(big));
+  const targetNum = isNumber ? Number(big) : 0;
+  const tweened = useTweenedNumber(targetNum);
+  const display = isNumber ? tweened : big;
   return (
     <div style={{
       padding: '16px 18px', borderRadius: 14,
       background: danger ? 'color-mix(in oklab, var(--danger) 8%, var(--cream))' : 'var(--cream-2)',
+      transition: 'background 200ms ease',
     }}>
       <div style={{ fontSize: 11, color: danger ? 'var(--danger)' : 'var(--olive-soft)', fontWeight: 600, letterSpacing: '0.02em', textTransform: 'uppercase' }}>{label}</div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 6 }}>
-        <span style={{ fontSize: 32, fontWeight: 800, color: danger ? 'var(--danger)' : 'var(--ink)', letterSpacing: '-0.025em' }}>{big}</span>
+        <span style={{ fontSize: 32, fontWeight: 800, color: danger ? 'var(--danger)' : 'var(--ink)', letterSpacing: '-0.025em', fontVariantNumeric: 'tabular-nums' }}>{display}</span>
         <span style={{ fontSize: 12, color: 'var(--olive-soft)' }}>{sub}</span>
       </div>
       {bar != null && (
         <div style={{ marginTop: 10, height: 4, background: 'color-mix(in oklab, var(--olive) 10%, transparent)', borderRadius: 4, overflow: 'hidden' }}>
-          <div style={{ height: '100%', width: `${bar}%`, background: 'var(--accent)', borderRadius: 4, transition: 'width 400ms ease' }} />
+          <div style={{ height: '100%', width: `${bar}%`, background: 'var(--accent)', borderRadius: 4, transition: 'width 500ms cubic-bezier(0.16, 1, 0.3, 1)' }} />
         </div>
       )}
     </div>

@@ -126,6 +126,33 @@ async function updateContact(id, fields) {
   return PEOPLE[idx];
 }
 
+const CONTACT_COLORS = ['#2E5BFF', '#7A3FE0', '#1F8A5B', '#E07A1F', '#C13B3B', '#4A5E80', '#0B8FB6', '#B6580B'];
+
+async function createContact({ name, initials, color }) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in');
+  const cleanName = (name || '').trim() || 'New contact';
+  const cleanInitials = (initials || cleanName.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase().slice(0, 3)) || '··';
+  const cleanColor = color || CONTACT_COLORS[Math.floor(Math.random() * CONTACT_COLORS.length)];
+  // Short random id, lowercase. Collisions within a user's namespace are
+  // astronomically unlikely; if they happen the insert errors and we retry.
+  const id = 'c-' + Math.random().toString(36).slice(2, 7);
+  const row = { id, owner_id: user.id, name: cleanName, initials: cleanInitials, color: cleanColor };
+  const { data, error } = await supabase.from('contacts').insert(row).select().single();
+  if (error) throw error;
+  const contact = { id: data.id, name: data.name, initials: data.initials, color: data.color };
+  PEOPLE.push(contact);
+  return contact;
+}
+
+async function deleteContact(id) {
+  if (id === 'me') throw new Error("You can't delete yourself.");
+  const { error } = await supabase.from('contacts').delete().eq('id', id);
+  if (error) throw error;
+  const idx = PEOPLE.findIndex(p => p.id === id);
+  if (idx >= 0) PEOPLE.splice(idx, 1);
+}
+
 /* Writes — per task, not bulk -------------------------------------------- */
 async function upsertTask(task) {
   const { data: { user } } = await supabase.auth.getUser();
@@ -219,7 +246,7 @@ export {
   PROJECTS, PEOPLE, PRIORITIES, STATUSES,
   toISODate, todayISO, addDays, startOfWeek, startOfMonth, fmtLong, fmtShort, dayName, relTime,
   uid,
-  loadContacts, loadTasks, upsertTask, deleteTask, addComment, updateContact,
+  loadContacts, loadTasks, upsertTask, deleteTask, addComment, updateContact, createContact, deleteContact,
   toCSV, downloadBlob,
   personById, projectById,
 };

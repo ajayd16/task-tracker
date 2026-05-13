@@ -7,6 +7,14 @@ import {
 import { TaskRow, TaskChip } from './components.jsx';
 import { PulseChart, ProjectDonut, PriorityStack, CompletionHeatmap } from './charts.jsx';
 
+/* When dateMode = 'created', use the task's creation date for all bucketing/
+   filtering. When 'due', use the due date (original behavior). createdAt is
+   a full ISO timestamp; we trim to the date portion. */
+function dateKey(task, mode) {
+  if (mode === 'created') return (task.createdAt || '').slice(0, 10);
+  return task.due || '';
+}
+
 /* ─── Section header (softer) ──────────────────────────────────────────── */
 function SectionHeader({ title, count, defaultOpen = true, onToggle, open, accent }) {
   return (
@@ -49,10 +57,13 @@ function SidebarBlock({ title, accent, children }) {
 }
 
 /* ─── Today view ───────────────────────────────────────────────────────── */
-function TodayView({ tasks, allTasks, onChange, onDelete, onEdit, anchorDate }) {
+function TodayView({ tasks, allTasks, onChange, onDelete, onEdit, anchorDate, dateMode }) {
   const iso = toISODate(anchorDate);
-  const todays = vuM(() => tasks.filter(t => t.due === iso), [tasks, iso]);
-  const overdue = vuM(() => tasks.filter(t => t.due < iso && t.status !== 'done').sort((a,b) => a.due.localeCompare(b.due)), [tasks, iso]);
+  const todays = vuM(() => tasks.filter(t => dateKey(t, dateMode) === iso), [tasks, iso, dateMode]);
+  // "Overdue" only meaningful for due dates. In created mode it's hidden.
+  const overdue = vuM(() => dateMode === 'due'
+    ? tasks.filter(t => t.due < iso && t.status !== 'done').sort((a,b) => a.due.localeCompare(b.due))
+    : [], [tasks, iso, dateMode]);
 
   const doing = todays.filter(t => t.status === 'doing');
   const todo  = todays.filter(t => t.status === 'todo');
@@ -141,7 +152,7 @@ function TodayView({ tasks, allTasks, onChange, onDelete, onEdit, anchorDate }) 
 }
 
 /* ─── Week view ────────────────────────────────────────────────────────── */
-function WeekView({ tasks, onChange, onDelete, onEdit, anchorDate, onQuickAdd }) {
+function WeekView({ tasks, onChange, onDelete, onEdit, anchorDate, onQuickAdd, dateMode }) {
   const start = startOfWeek(anchorDate);
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
   const todayKey = todayISO();
@@ -152,7 +163,7 @@ function WeekView({ tasks, onChange, onDelete, onEdit, anchorDate, onQuickAdd })
         {days.map(d => {
           const key = toISODate(d);
           const isToday = key === todayKey;
-          const dayTasks = tasks.filter(t => t.due === key);
+          const dayTasks = tasks.filter(t => dateKey(t, dateMode) === key);
           const doneCt = dayTasks.filter(t => t.status === 'done').length;
           return (
             <div key={key} style={{
@@ -194,7 +205,7 @@ function WeekView({ tasks, onChange, onDelete, onEdit, anchorDate, onQuickAdd })
 }
 
 /* ─── Calendar view ────────────────────────────────────────────────────── */
-function CalendarView({ tasks, onEdit, anchorDate, onDayFocus }) {
+function CalendarView({ tasks, onEdit, anchorDate, onDayFocus, dateMode }) {
   const monthStart = startOfMonth(anchorDate);
   const gridStart = startOfWeek(monthStart);
   const todayKey = todayISO();
@@ -212,7 +223,7 @@ function CalendarView({ tasks, onEdit, anchorDate, onDayFocus }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
         {cells.map((d, idx) => {
           const key = toISODate(d);
-          const dayTasks = tasks.filter(t => t.due === key);
+          const dayTasks = tasks.filter(t => dateKey(t, dateMode) === key);
           const inMonth = d.getMonth() === monthIdx;
           const isToday = key === todayKey;
           const doneCt = dayTasks.filter(t => t.status === 'done').length;
@@ -266,42 +277,48 @@ function CalendarView({ tasks, onEdit, anchorDate, onDayFocus }) {
 }
 
 /* ─── All view ─────────────────────────────────────────────────────────── */
-function AllView({ tasks, onChange, onDelete, onEdit }) {
+function AllView({ tasks, onChange, onDelete, onEdit, dateMode }) {
   const [range, setRange] = vuS('all');
   const [status, setStatus] = vuS('all');
   const [project, setProject] = vuS('all');
   const [priority, setPriority] = vuS('all');
   const [person, setPerson] = vuS('all');
-  const [sort, setSort] = vuS('due-asc');
+  const [sort, setSort] = vuS(dateMode === 'created' ? 'created' : 'due-asc');
 
   const filtered = vuM(() => {
     const today = todayISO();
     const weekStart = toISODate(startOfWeek(new Date()));
     const weekEnd = toISODate(addDays(startOfWeek(new Date()), 6));
+    const key = (t) => dateKey(t, dateMode);
     let out = tasks.slice();
-    if (range === 'today') out = out.filter(t => t.due === today);
-    else if (range === 'week') out = out.filter(t => t.due >= weekStart && t.due <= weekEnd);
-    else if (range === 'overdue') out = out.filter(t => t.due < today && t.status !== 'done');
+    if (range === 'today') out = out.filter(t => key(t) === today);
+    else if (range === 'week') out = out.filter(t => key(t) >= weekStart && key(t) <= weekEnd);
+    else if (range === 'overdue') out = out.filter(t => dateMode === 'due' && t.due < today && t.status !== 'done');
     if (status !== 'all') out = out.filter(t => t.status === status);
     if (project !== 'all') out = out.filter(t => t.project === project);
     if (priority !== 'all') out = out.filter(t => t.priority === priority);
     if (person !== 'all') out = out.filter(t => (t.collaborators || []).includes(person));
     out.sort((a, b) => {
-      if (sort === 'due-asc')  return a.due.localeCompare(b.due);
-      if (sort === 'due-desc') return b.due.localeCompare(a.due);
+      if (sort === 'due-asc')  return (a.due || '').localeCompare(b.due || '');
+      if (sort === 'due-desc') return (b.due || '').localeCompare(a.due || '');
       if (sort === 'priority') return (PRIORITIES.find(p => p.id === b.priority).rank) - (PRIORITIES.find(p => p.id === a.priority).rank);
       if (sort === 'created')  return (b.createdAt || '').localeCompare(a.createdAt || '');
       return 0;
     });
     return out;
-  }, [tasks, range, status, project, priority, person, sort]);
+  }, [tasks, range, status, project, priority, person, sort, dateMode]);
+
+  // Hide "Overdue" filter button in created mode since it doesn't apply.
+  const whenOpts = dateMode === 'due'
+    ? [['all','All'],['today','Today'],['week','This week'],['overdue','Overdue']]
+    : [['all','All'],['today','Today'],['week','This week']];
 
   return (
     <div style={{ padding: '14px 32px 40px' }}>
       {/* Filter row */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 18, alignItems: 'center' }}>
         <FilterGroup label="WHEN" value={range} onChange={setRange}
-          opts={[['all','All'],['today','Today'],['week','This week'],['overdue','Overdue']]} />
+          opts={whenOpts} />
         <FilterGroup label="STATUS" value={status} onChange={setStatus}
           opts={[['all','All'], ...STATUSES.map(s => [s.id, s.label])]} />
         <FilterDropdown label="PROJECT" value={project} onChange={setProject}
