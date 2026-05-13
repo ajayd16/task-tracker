@@ -11,6 +11,7 @@ import {
 import { Header, StatStrip, TaskModal } from './components.jsx';
 import { TodayView, WeekView, CalendarView, AllView } from './views.jsx';
 import { AuthGate, signOut } from './AuthGate.jsx';
+import { confirm, ConfirmHost } from './Confirm.jsx';
 
 function App() {
   const [tasks, setTasks] = uS([]);
@@ -184,16 +185,22 @@ function App() {
           › loading tasks<span className="blink">_</span>
         </div>
       )}
-      <Header
-        view={view} setView={setView}
-        onNew={() => openNew()}
-        onExport={() => setExportOpen(true)}
-        dateLabel={dateLabel}
-        onPrev={goPrev} onNext={goNext} onToday={goToday}
-        showNav={view !== 'all'}
-        search={search} setSearch={setSearch} searchRef={searchRef}
-        dateMode={dateMode} setDateMode={setDateMode}
-      />
+      <div style={{
+        position: 'sticky', top: 0, zIndex: 25,
+        background: 'var(--cream)',
+        boxShadow: '0 1px 0 color-mix(in oklab, var(--olive) 10%, transparent)',
+      }}>
+        <Header
+          view={view} setView={setView}
+          onNew={() => openNew()}
+          onExport={() => setExportOpen(true)}
+          dateLabel={dateLabel}
+          onPrev={goPrev} onNext={goNext} onToday={goToday}
+          showNav={view !== 'all'}
+          search={search} setSearch={setSearch} searchRef={searchRef}
+          dateMode={dateMode} setDateMode={setDateMode}
+        />
+      </div>
       <StatStrip tasks={tasks} dateMode={dateMode} />
 
       <main style={{ flex: 1 }}>
@@ -205,11 +212,17 @@ function App() {
         </div>
       </main>
 
-      <Footer
-        tasks={tasks}
-        onOpenContacts={() => setContactsOpen(true)}
-        onOpenProjects={() => setProjectsOpen(true)}
-      />
+      <div style={{
+        position: 'sticky', bottom: 0, zIndex: 25,
+        background: 'var(--cream)',
+        boxShadow: '0 -1px 0 color-mix(in oklab, var(--olive) 10%, transparent)',
+      }}>
+        <Footer
+          tasks={tasks}
+          onOpenContacts={() => setContactsOpen(true)}
+          onOpenProjects={() => setProjectsOpen(true)}
+        />
+      </div>
 
       {modalTask && (
         <TaskModal task={modalTask} onSave={upsert} onClose={() => setModalTask(null)} onDelete={remove} />
@@ -231,7 +244,7 @@ function App() {
         onClick={() => openNew()}
         aria-label="Add task"
         style={{
-          position: 'fixed', right: 28, bottom: 28, zIndex: 30,
+          position: 'fixed', right: 28, bottom: 84, zIndex: 30,
           width: 58, height: 58, padding: 0, borderRadius: '50%',
           background: 'var(--accent)', color: 'white',
           border: 'none', boxShadow: '0 10px 24px color-mix(in oklab, var(--accent) 45%, transparent)',
@@ -243,6 +256,8 @@ function App() {
         onMouseDown={e => { e.currentTarget.style.transform = 'translateY(-1px) scale(0.96)'; }}
         onMouseUp={e => { e.currentTarget.style.transform = 'translateY(-3px) scale(1.06)'; }}
       >+</button>
+
+      <ConfirmHost />
     </div>
   );
 }
@@ -407,7 +422,13 @@ function ContactsSheet({ onClose, onSaved }) {
   };
 
   const remove = async (id) => {
-    if (!confirm('Delete this contact? They will be removed from all your tasks.')) return;
+    const ok = await confirm({
+      title: 'Delete this contact?',
+      body: 'They will be removed from all your tasks. This can\u2019t be undone.',
+      confirmText: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
     setErr(''); setBusy(true);
     try {
       await deleteContact(id);
@@ -599,7 +620,13 @@ function ProjectsSheet({ onClose, onSaved, onDeleted }) {
   };
 
   const remove = async (id) => {
-    if (!confirm('Delete this project? Tasks tagged with it will be moved to Inbox.')) return;
+    const ok = await confirm({
+      title: 'Delete this project?',
+      body: 'Tasks tagged with it will be moved to Inbox. This can\u2019t be undone.',
+      confirmText: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
     setErr(''); setBusy(true);
     try {
       await deleteProject(id);

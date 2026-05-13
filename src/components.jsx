@@ -4,6 +4,7 @@ import {
   PROJECTS, PEOPLE, PRIORITIES, STATUSES,
   addDays, personById, projectById, relTime, startOfWeek, toISODate, todayISO, uid,
 } from './data.js';
+import { confirm } from './Confirm.jsx';
 
 /* ─── Project chip ─────────────────────────────────────────────────────── */
 function ProjectChip({ id, size = 'sm' }) {
@@ -180,7 +181,16 @@ function TaskRow({ task, onChange, onDelete, onEdit }) {
       </span>
 
       <button
-        onClick={(e) => { e.stopPropagation(); onDelete(task.id); }}
+        onClick={async (e) => {
+          e.stopPropagation();
+          const ok = await confirm({
+            title: 'Delete this task?',
+            body: task.title,
+            confirmText: 'Delete',
+            danger: true,
+          });
+          if (ok) onDelete(task.id);
+        }}
         title="Delete task"
         style={{
           width: 28, height: 28, padding: 0,
@@ -419,9 +429,22 @@ function TaskModal({ task, onSave, onClose, onDelete, onAddComment }) {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 22px', borderTop: 'var(--border-thin)', background: 'var(--cream-2)', borderBottomLeftRadius: 18, borderBottomRightRadius: 18 }}>
           <div>
             {!isNew && (
-              <button type="button" onClick={() => onDelete(draft.id)} style={{
-                padding: '9px 16px', border: 'none', borderRadius: 8, background: 'transparent', color: 'var(--danger)', fontWeight: 700, fontSize: 12, letterSpacing: '0.04em',
-              }}>DELETE</button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: 'Delete this task?',
+                    body: draft.title || 'Untitled task',
+                    confirmText: 'Delete',
+                    danger: true,
+                  });
+                  if (ok) onDelete(draft.id);
+                }}
+                style={{
+                  padding: '9px 16px', border: 'none', borderRadius: 8, background: 'transparent', color: 'var(--danger)', fontWeight: 700, fontSize: 12, letterSpacing: '0.04em',
+                  cursor: 'pointer',
+                }}
+              >DELETE</button>
             )}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -484,12 +507,12 @@ function Header({ view, setView, onNew, onExport, dateLabel, onPrev, onNext, onT
     <header style={{ padding: '22px 32px 0', background: 'transparent' }}>
       {/* TOP ROW — brand + search + actions */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginBottom: 22 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <Mark />
-          <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.05 }}>
-            <span style={{ fontWeight: 800, fontSize: 19, letterSpacing: '-0.02em' }}>tasks</span>
-            <span style={{ fontSize: 11, color: 'var(--olive-soft)' }}>daily ops</span>
-          </div>
+          <span style={{
+            fontWeight: 800, fontSize: 19, letterSpacing: '-0.02em',
+            color: 'var(--ink)',
+          }}>Task Tracker</span>
         </div>
 
         {/* Global search */}
@@ -519,7 +542,6 @@ function Header({ view, setView, onNew, onExport, dateLabel, onPrev, onNext, onT
         <button onClick={onNew} style={btnStyle('primary')}>
           <span style={{ fontSize: 16, lineHeight: 0 }}>+</span> NEW TASK
         </button>
-        <Ticker />
       </div>
 
       {/* BOTTOM ROW — view tabs + date nav */}
@@ -630,9 +652,19 @@ function NavBtn({ children, onClick }) {
 
 function Mark() {
   return (
-    <svg width="32" height="32" viewBox="0 0 32 32" aria-hidden>
-      <rect x="0" y="0" width="32" height="32" rx="10" fill="var(--ink)" />
-      <path d="M9 16.5 L14 21.5 L24 11" stroke="var(--accent)" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden>
+      <rect x="0" y="0" width="34" height="34" rx="10" fill="var(--ink)" />
+      {/* three stacked task rows */}
+      <rect x="8" y="9"  width="4" height="4" rx="1.2" fill="var(--olive-soft)" />
+      <rect x="14" y="10" width="13" height="2" rx="1" fill="var(--cream)" opacity="0.55" />
+
+      <rect x="8" y="15" width="4" height="4" rx="1.2" fill="var(--accent)" />
+      <rect x="14" y="16" width="13" height="2" rx="1" fill="var(--cream)" />
+      {/* the active row's tick */}
+      <path d="M8.8 17 L10.1 18.3 L12 16.2" stroke="white" strokeWidth="1.3" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+
+      <rect x="8" y="21" width="4" height="4" rx="1.2" fill="var(--olive-soft)" />
+      <rect x="14" y="22" width="9" height="2" rx="1" fill="var(--cream)" opacity="0.55" />
     </svg>
   );
 }

@@ -5,7 +5,7 @@ import {
   addDays, dayName, projectById, startOfMonth, startOfWeek, toISODate, todayISO,
 } from './data.js';
 import { TaskRow, TaskChip } from './components.jsx';
-import { PulseChart, ProjectDonut, PriorityStack, CompletionHeatmap } from './charts.jsx';
+import { PulseChart, ProjectDonut, PriorityStack } from './charts.jsx';
 
 /* When dateMode = 'created', use the task's creation date for all bucketing/
    filtering. When 'due', use the due date (original behavior). createdAt is
@@ -52,6 +52,80 @@ function SidebarBlock({ title, accent, children }) {
         <span style={{ fontSize: 10, color: accent ? 'var(--danger)' : 'var(--olive-soft)', letterSpacing: '0.1em', fontWeight: 700 }}>{title}</span>
       </div>
       {children}
+    </div>
+  );
+}
+
+/* Sidebar Up Next: the most relevant open tasks. Sorted by priority desc,
+   then by due date asc. Replaces the older "ACTIVITY · 4 WEEKS" heatmap. */
+function UpNextList({ tasks, onEdit }) {
+  const items = vuM(() => {
+    const today = todayISO();
+    const open = tasks.filter(t => t.status !== 'done');
+    const priorityRank = (id) => (PRIORITIES.find(p => p.id === id) || PRIORITIES[1]).rank;
+    open.sort((a, b) => {
+      const r = priorityRank(b.priority) - priorityRank(a.priority);
+      if (r !== 0) return r;
+      // Treat tasks with no due date as "later"
+      const ad = a.due || '9999-12-31';
+      const bd = b.due || '9999-12-31';
+      return ad.localeCompare(bd);
+    });
+    return open.slice(0, 5).map(t => {
+      const overdue = t.due && t.due < today;
+      return { ...t, overdue };
+    });
+  }, [tasks]);
+
+  if (items.length === 0) {
+    return (
+      <div style={{
+        padding: '14px 12px', background: 'var(--cream)', borderRadius: 10,
+        fontSize: 12, color: 'var(--olive-soft)', fontStyle: 'italic',
+      }}>nothing on deck — all clear</div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {items.map((t, i) => {
+        const pr = PRIORITIES.find(p => p.id === t.priority) || PRIORITIES[1];
+        const prColor = pr.id === 'crit' ? 'var(--danger)' : pr.id === 'high' ? 'var(--warn)' : pr.id === 'med' ? 'var(--accent)' : 'var(--olive-soft)';
+        return (
+          <button
+            key={t.id}
+            onClick={() => onEdit(t)}
+            style={{
+              display: 'grid', gridTemplateColumns: '3px 1fr auto', gap: 10,
+              alignItems: 'center', padding: '8px 10px',
+              background: 'var(--cream)', border: 'none', borderRadius: 10,
+              cursor: 'pointer', textAlign: 'left',
+              transition: 'background 140ms ease, transform 140ms ease',
+              animation: `slidein 240ms ease ${i * 40}ms both`,
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--cream-2)'; e.currentTarget.style.transform = 'translateX(2px)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'var(--cream)'; e.currentTarget.style.transform = 'translateX(0)'; }}
+          >
+            <span style={{ width: 3, height: 22, background: prColor, borderRadius: 2 }} />
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+              <span style={{
+                fontSize: 12, fontWeight: 600, color: 'var(--ink)',
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>{t.title}</span>
+              <span style={{ fontSize: 10, color: t.overdue ? 'var(--danger)' : 'var(--olive-soft)', fontWeight: 500 }}>
+                {t.due
+                  ? (t.overdue ? `overdue · ${t.due}` : t.due === todayISO() ? 'today' : t.due)
+                  : 'no due date'}
+                {' · '}{projectById(t.project).label}
+              </span>
+            </span>
+            <span style={{
+              fontSize: 9, fontWeight: 700, color: prColor,
+              letterSpacing: '0.06em', fontFamily: 'var(--font-mono)',
+            }}>{pr.label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -143,8 +217,8 @@ function TodayView({ tasks, allTasks, onChange, onDelete, onEdit, anchorDate, da
           <PriorityStack tasks={fullTasks.filter(t => t.status !== 'done')} />
         </SidebarBlock>
 
-        <SidebarBlock title="ACTIVITY · 4 WEEKS">
-          <CompletionHeatmap tasks={fullTasks} />
+        <SidebarBlock title="UP NEXT · TOP 5">
+          <UpNextList tasks={fullTasks} onEdit={onEdit} />
         </SidebarBlock>
       </aside>
     </div>
